@@ -69,15 +69,15 @@ function withHint(f, hint) {
   return w;
 }
 
-/** Numeric field bound to obj[key]. A whole-number step (e.g. layer counts) rounds the value. */
-export function numberField({ label, unit, obj, key, min, max, step = 0.01, onChange, hint, title }) {
+/** Numeric field bound to obj[key]. `integer` rounds the value (layer counts, PWM). */
+export function numberField({ label, unit, obj, key, min, max, step = 0.01, integer = false, onChange, hint, title }) {
   const input = el('input', { type: 'number', step, min, max, value: obj[key], title });
   input.addEventListener('change', () => {
     let v = parseFloat(input.value);
     if (!Number.isFinite(v)) { input.value = obj[key]; return; }
     if (min != null) v = Math.max(min, v);
     if (max != null) v = Math.min(max, v);
-    if (Number.isInteger(+step) && +step >= 1) v = Math.round(v);
+    if (integer) v = Math.round(v);
     input.value = v;
     obj[key] = v;
     onChange?.(v, key);
