@@ -1,0 +1,91 @@
+{
+  "name": "vatworks",
+  "version": "1.0.0",
+  "description": "Self-hosted resin (MSLA) slicer for the Elegoo Saturn 4 Ultra — zero runtime dependencies",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/core.test.mjs",
+    "desktop": "electron .",
+    "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
+    "dist:mac:arm64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --arm64",
+    "dist:mac:x64": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --x64"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3"
+  },
+  "main": "desktop/main.js",
+  "build": {
+    "appId": "com.larmanlab.vatworks",
+    "productName": "Vatworks",
+    "copyright": "Vatworks — resin slicer",
+    "directories": {
+      "output": "dist",
+      "buildResources": "desktop/build"
+    },
+    "files": [
+      "desktop/main.js",
+      "desktop/preload.cjs",
+      "server.js",
+      "public/**/*",
+      "package.json",
+      "README.md"
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "desktop/build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "darkModeSupport": false,
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 140,
+          "y": 190
+        },
+        {
+          "x": 410,
+          "y": 190,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    },
+    "fileAssociations": [
+      {
+        "ext": [
+          "stl",
+          "obj",
+          "3mf"
+        ],
+        "name": "3D model",
+        "role": "Viewer"
+      },
+      {
+        "ext": "goo",
+        "name": "Elegoo GOO sliced file",
+        "role": "Viewer"
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+# Vatworks — self-hosted resin slicer for the Elegoo Saturn 4 Ultra
+#
+#   docker compose pull && docker compose up -d     # run the image published by GitHub Actions
+#   docker compose up -d --build                    # or build from this checkout instead
+#
+# Set VATWORKS_IMAGE in a .env file next to this compose file (see .env.example), e.g.
+#   VATWORKS_IMAGE=ghcr.io/<your-github-user>/vatworks:latest
+#
+# Host networking lets the container hear the printer's UDP discovery replies ("Find printers") and reach it
+# directly on the LAN. Prefer a bridge network? Comment out network_mode and uncomment the ports block —
+# discovery stops working across the bridge, but connecting to the printer by IP still does.
+services:
+  vatworks:
+    image: ${VATWORKS_IMAGE:-ghcr.io/your-github-user/vatworks:latest}
+    build: .
+    container_name: vatworks
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - PORT=${PORT:-8090}
+    # ports:
+    #   - "8090:8090"

@@ -1,0 +1,22 @@
+# systemd unit for running Vatworks straight in an LXC (no Docker):
+#   cp -r vatworks /opt/vatworks && cp /opt/vatworks/vatworks.service /etc/systemd/system/
+#   systemctl enable --now vatworks
+[Unit]
+Description=Vatworks resin slicer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vatworks
+Environment=PORT=8090
+ExecStart=/usr/bin/node /opt/vatworks/server.js
+Restart=on-failure
+User=vatworks
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
