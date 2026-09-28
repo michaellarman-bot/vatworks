@@ -3,8 +3,7 @@
 import dgram from 'node:dgram';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import ws from 'ws';
-const { WebSocketServer } = ws;
+import { WebSocketServer } from 'ws';
 
 export function startMockPrinter({ udpPort = 3000, port = 3030, ip = '127.0.0.1' } = {}) {
   const ID = 'a1b2c3d4e5f6a7b8a1b2c3d4e5f6a7b8', BOARD = '0000000000mock01';

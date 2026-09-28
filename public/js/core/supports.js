@@ -49,14 +49,28 @@ export function findContactPoints(tris, opt) {
       }
     }
   }
+  // a flat underside is one minimum, not one per vertex: group level-connected minima and keep one per group
+  // (the lattice below covers the rest of a large flat face)
+  const group = new Int32Array(count).map((_, i) => i);
+  const find = (a) => { while (group[a] !== a) a = group[a] = group[group[a]]; return a; };
+  for (let t = 0; t < T; t++) {
+    for (let k = 0; k < 3; k++) {
+      const a = index[t * 3 + k], b = index[t * 3 + ((k + 1) % 3)];
+      if (Math.abs(verts[a * 3 + 2] - verts[b * 3 + 2]) <= 1e-5) group[find(a)] = find(b);
+    }
+  }
+  const taken = new Set();
   for (let v = 0; v < count; v++) {
     const z = verts[v * 3 + 2];
     if (z < opt.minHeight) continue;
     if (lowestNeighbour[v] < z - 1e-5) continue; // something lower is attached: not a minimum
+    const g = find(v);
+    if (taken.has(g)) continue;
     let nx = nrm[v * 3], ny = nrm[v * 3 + 1], nz = nrm[v * 3 + 2];
     const l = Math.hypot(nx, ny, nz) || 1;
     nx /= l; ny /= l; nz /= l;
     if (nz > -0.05) continue; // vertex normal faces up/sideways: it's the bottom of a pit, not of the part
+    taken.add(g);
     pts.push({ p: [verts[v * 3], verts[v * 3 + 1], z], n: [nx, ny, nz], kind: 'min' });
   }
 
@@ -75,12 +89,13 @@ export function findContactPoints(tris, opt) {
     if (nz > -cosLimit) continue;
     const d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
     if (d === 0) continue;
-    const x0 = Math.ceil(Math.min(ax, bx, cx) / s), x1 = Math.floor(Math.max(ax, bx, cx) / s);
+    const minX = Math.min(ax, bx, cx) / s, maxX = Math.max(ax, bx, cx) / s;
     const y0 = Math.ceil(Math.min(ay, by, cy) / s), y1 = Math.floor(Math.max(ay, by, cy) / s);
     for (let gy = y0; gy <= y1; gy++) {
-      for (let gx = x0; gx <= x1; gx++) {
-        // stagger alternate rows for a hexagonal-ish pattern
-        const x = (gx + (gy & 1 ? 0.5 : 0)) * s, y = gy * s;
+      // stagger alternate rows for a hexagonal-ish pattern (odd rows sit half a step over, so shift their range too)
+      const off = gy & 1 ? 0.5 : 0;
+      for (let gx = Math.ceil(minX - off), x1 = Math.floor(maxX - off); gx <= x1; gx++) {
+        const x = (gx + off) * s, y = gy * s;
         const l1 = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d;
         const l2 = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d;
         const l3 = 1 - l1 - l2;
@@ -152,6 +167,7 @@ export function planSupport(contact, grid, opt) {
   const E = [px - dx * opt.contactDepth, py - dy * opt.contactDepth, pz - dz * opt.contactDepth];
   let J = [px + dx * tipLen, py + dy * tipLen, pz + dz * tipLen];
   if (J[2] < floorZ + 0.2) J[2] = floorZ + 0.2;
+  if (J[2] >= pz - 0.05) return null; // contact sits at or below the raft/plate: no room for a tip (raise the model)
 
   // a drop is usable when the pillar (centre + its rim) is outside the model and sees nothing below but the plate
   const rim = opt.pillarDiameter / 2 + 0.15;

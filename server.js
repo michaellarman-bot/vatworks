@@ -38,7 +38,8 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 // ---------------------------------------------------------------- helpers
 
 function isPrivateIp(ip) {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip || '');
+  // no leading zeros: URL and getaddrinfo read "010" as octal, which would slip past this check
+  const m = /^(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})$/.exec(ip || '');
   if (!m) return false;
   const [a, b, c, d] = m.slice(1).map(Number);
   if ([a, b, c, d].some((x) => x > 255)) return false;
@@ -224,7 +225,17 @@ async function readJson(req) {
   return text ? JSON.parse(text) : {};
 }
 
+/** Browsers always send Origin on cross-site POSTs; refuse them so other pages cannot drive the printer. */
+function crossOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return false;
+  // a reverse proxy may rewrite Host; it then usually passes the original in X-Forwarded-Host
+  const hosts = [req.headers.host, ...String(req.headers['x-forwarded-host'] || '').split(',').map((h) => h.trim())];
+  try { return !hosts.includes(new URL(origin).host); } catch { return true; }
+}
+
 async function api(req, res, url) {
+  if (crossOrigin(req)) return json(res, 403, { error: 'Cross-origin requests are not allowed.' });
   const parts = url.pathname.split('/').filter(Boolean); // ['api', ...]
   if (parts[1] === 'discover' && req.method === 'GET') {
     const ip = url.searchParams.get('ip') || undefined;
@@ -258,6 +269,7 @@ async function api(req, res, url) {
       try {
         await pipeline(req, fs.createWriteStream(tmp));
         const size = (await fs.promises.stat(tmp)).size;
+        if (!size) throw new Error('The upload was empty.');
         line({ stage: 'received', total: size });
         const startPrint = url.searchParams.get('print') === '1';
         const r = await uploadToPrinter(ip, tmp, filename, size, (sent) => line({ stage: 'upload', sent, total: size }));
@@ -265,8 +277,8 @@ async function api(req, res, url) {
         if (startPrint) {
           const ack = await withPrinter(ip, (s) => s.send(128, { Filename: filename, StartLayer: 0 }, 20000));
           line({ stage: 'print', ack });
-        }
-        line({ done: true, filename });
+          line({ done: true, filename, ack });
+        } else line({ done: true, filename });
       } catch (e) {
         line({ error: e.message });
       } finally {
@@ -302,12 +314,14 @@ function serveStatic(req, res, url) {
 export function createServer({ publicDir } = {}) {
   if (publicDir) PUBLIC = publicDir;
   return http.createServer(async (req, res) => {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    let url;
     try {
+      // a fixed base: a malformed Host header must not throw outside the try (it would kill the process)
+      url = new URL(req.url, 'http://localhost');
       if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else serveStatic(req, res, url);
     } catch (e) {
-      log('error', req.method, url.pathname, e.message);
+      log('error', req.method, url?.pathname ?? req.url, e.message);
       if (!res.headersSent) json(res, 500, { error: e.message });
       else res.end();
     }

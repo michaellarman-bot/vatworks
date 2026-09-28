@@ -61,7 +61,15 @@ export function progressDialog(title, { onCancel } = {}) {
   };
 }
 
-/** Numeric field bound to obj[key]. */
+/** Wraps a field with a hint line; the wrapper keeps the field's refresh() so resets reach the input. */
+function withHint(f, hint) {
+  if (!hint) return f;
+  const w = el('div', {}, f, el('div', { class: 'field-hint' }, hint));
+  w.refresh = f.refresh;
+  return w;
+}
+
+/** Numeric field bound to obj[key]. A whole-number step (e.g. layer counts) rounds the value. */
 export function numberField({ label, unit, obj, key, min, max, step = 0.01, onChange, hint, title }) {
   const input = el('input', { type: 'number', step, min, max, value: obj[key], title });
   input.addEventListener('change', () => {
@@ -69,13 +77,14 @@ export function numberField({ label, unit, obj, key, min, max, step = 0.01, onCh
     if (!Number.isFinite(v)) { input.value = obj[key]; return; }
     if (min != null) v = Math.max(min, v);
     if (max != null) v = Math.min(max, v);
+    if (Number.isInteger(+step) && +step >= 1) v = Math.round(v);
     input.value = v;
     obj[key] = v;
     onChange?.(v, key);
   });
   const f = el('div', { class: 'field' }, el('label', {}, label), el('span', { class: 'in' }, input, unit ? el('span', { class: 'unit' }, unit) : null));
   f.refresh = () => { input.value = obj[key]; };
-  return hint ? el('div', {}, f, el('div', { class: 'field-hint' }, hint)) : f;
+  return withHint(f, hint);
 }
 
 export function selectField({ label, obj, key, options, onChange, hint, wide }) {
@@ -83,7 +92,7 @@ export function selectField({ label, obj, key, options, onChange, hint, wide }) 
   sel.addEventListener('change', () => { obj[key] = sel.value; onChange?.(sel.value); });
   const f = el('div', { class: `field ${wide ? 'wide' : ''}` }, el('label', {}, label), el('span', { class: 'in' }, sel));
   f.refresh = () => { sel.value = obj[key]; };
-  return hint ? el('div', {}, f, el('div', { class: 'field-hint' }, hint)) : f;
+  return withHint(f, hint);
 }
 
 export function toggleField({ label, obj, key, onChange, hint }) {
@@ -91,7 +100,7 @@ export function toggleField({ label, obj, key, onChange, hint }) {
   b.addEventListener('click', () => { obj[key] = !obj[key]; b.setAttribute('aria-checked', String(obj[key])); onChange?.(obj[key]); });
   const f = el('div', { class: 'field toggle' }, el('label', {}, label), b);
   f.refresh = () => b.setAttribute('aria-checked', String(!!obj[key]));
-  return hint ? el('div', {}, f, el('div', { class: 'field-hint' }, hint)) : f;
+  return withHint(f, hint);
 }
 
 export function stat(k, v) { return el('div', { class: 'stat' }, el('div', { class: 'k' }, k), el('div', { class: 'v' }, v)); }

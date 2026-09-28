@@ -61,6 +61,8 @@ Running Docker inside an unprivileged Proxmox LXC needs the container's *nesting
 
 If you publish it through Cloudflare Tunnel, put it behind Cloudflare Access (or any login). Anyone who can reach the
 page can start a print on your printer.
+The API refuses cross-origin browser requests (an `Origin` that doesn't match `Host`), so other web pages can't
+drive the printer. Behind a reverse proxy that rewrites `Host`, forward the original in `X-Forwarded-Host`.
 
 ## Mac app
 

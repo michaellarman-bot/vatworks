@@ -70,7 +70,7 @@ function setStatus(text, busy = false) {
 function applyMachine() {
   machine = getMachine(state);
   viewport.setMachine(machine);
-  maskView.setMachine(machine);
+  if (!sliced?.fromFile) maskView.setMachine(machine); // an opened .goo keeps its own resolution
   $('#foot-machine').textContent = `${machine.name} · ${machine.resX}×${machine.resY} · ${machine.width}×${machine.depth}×${machine.height} mm`;
   for (const o of objects) checkBounds(o);
   markStale();
@@ -162,6 +162,7 @@ function finishTransform(o, kind) {
   if (kind !== 'translate' && kind !== 'lift') o.group.position.z -= box.min.z; // rest on the plate
   else if (box.min.z < 0) o.group.position.z -= box.min.z;
   o.group.updateMatrixWorld(true);
+  supportWorker.postMessage({ id: 0, type: 'forget', objectId: o.id }); // its cached ray grid is in the old position
   reconcileDependents(o);
   checkBounds(o);
   viewport.updateBox();
@@ -228,13 +229,13 @@ function refreshTransformCard() {
   const b = viewport.worldBounds(o.id);
   const size = [b.max.x - b.min.x, b.max.y - b.min.y, b.max.z - b.min.z];
   tc.size.forEach((inp, i) => { if (document.activeElement !== inp) inp.value = size[i].toFixed(1); });
-  if (document.activeElement !== tc.pct) tc.pct.value = (o.group.scale.x * 100).toFixed(1);
+  if (document.activeElement !== tc.pct) tc.pct.value = (Math.abs(o.group.scale.x) * 100).toFixed(1);
   const r = o.group.rotation;
   [r.x, r.y, r.z].forEach((v, i) => { if (document.activeElement !== tc.rot[i]) tc.rot[i].value = ((v * 180) / Math.PI).toFixed(1); });
   const pos = [(b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, b.min.z];
   tc.pos.forEach((inp, i) => { if (document.activeElement !== inp) inp.value = pos[i].toFixed(1); });
   const mm3 = o.volume * Math.abs(o.group.scale.x * o.group.scale.y * o.group.scale.z);
-  $('#object-info').textContent = `${o.tris.toLocaleString()} triangles · ${(mm3 / 1000).toFixed(2)} mL solid${o.hollow ? ` · hollowed (${state.hollow.wall} mm wall)` : ''}${o.supports ? ` · ${o.supports.plans.length} supports` : ''}${o.out ? ' · outside the printable area' : ''}`;
+  $('#object-info').textContent = `${o.tris.toLocaleString()} triangles · ${(mm3 / 1000).toFixed(2)} mL solid${o.hollow ? ` · hollowed (${o.hollow.wall} mm wall)` : ''}${o.supports ? ` · ${o.supports.plans.length} supports` : ''}${o.out ? ' · outside the printable area' : ''}`;
 }
 tc.size.forEach((inp, axis) => inp.addEventListener('change', () => {
   const o = selected();
@@ -248,7 +249,7 @@ tc.size.forEach((inp, axis) => inp.addEventListener('change', () => {
   else o.group.scale.setComponent(axis, o.group.scale.getComponent(axis) * f);
   finishTransform(o, 'scale');
 }));
-tc.pct.addEventListener('change', () => { const o = selected(); const v = parseFloat(tc.pct.value); if (o && v > 0) { o.group.scale.setScalar(v / 100); finishTransform(o, 'scale'); } });
+tc.pct.addEventListener('change', () => { const o = selected(); const v = parseFloat(tc.pct.value); if (o && v > 0) { o.group.scale.multiplyScalar(v / 100 / Math.abs(o.group.scale.x)); finishTransform(o, 'scale'); } }); // keeps mirroring and per-axis ratios
 tc.rot.forEach((inp, axis) => inp.addEventListener('change', () => {
   const o = selected();
   const v = parseFloat(inp.value);
@@ -446,20 +447,24 @@ async function addManualSupport(o, hit) {
   const contact = { p: [hit.point.x, hit.point.y, hit.point.z], n: [hit.normal.x, hit.normal.y, hit.normal.z], kind: 'manual' };
   setStatus('Placing support', true);
   try {
-    let r;
-    try { r = await call(supportWorker, { type: 'plan', objectId: o.id, contact, opt }); } catch (e) {
-      if (e.message !== 'needs-geometry') throw e;
-      await ensureSupportGeometry(o);
-      r = await call(supportWorker, { type: 'plan', objectId: o.id, contact, opt });
-    }
+    const r = await supportCall(o, { type: 'plan', objectId: o.id, contact, opt });
     if (!r.plan) return toast('No clear path from that spot down to the plate (or the model).', 'error');
     const plans = [...(o.supports?.plans || []), r.plan];
     await rebuildSupports(o, plans, opt);
   } catch (e) { toast(`Could not add a support: ${e.message}`, 'error'); } finally { setStatus('Ready'); }
 }
 
+/** Calls the support worker, sending the object's geometry first if the worker has none cached (new, moved or copied). */
+async function supportCall(o, msg) {
+  try { return await call(supportWorker, msg); } catch (e) {
+    if (e.message !== 'needs-geometry') throw e;
+    await ensureSupportGeometry(o);
+    return call(supportWorker, msg);
+  }
+}
+
 async function rebuildSupports(o, plans, opt) {
-  const r = await call(supportWorker, { type: 'build', objectId: o.id, plans, opt });
+  const r = await supportCall(o, { type: 'build', objectId: o.id, plans, opt });
   if (!plans.length) clearSupports(o, true);
   else { o.supports = { plans: r.plans, tris: r.tris, ranges: r.ranges, opt, matrix: o.group.matrixWorld.elements.slice() }; viewport.setSupports(o.id, r.tris, r.ranges); }
   checkBounds(o);
@@ -687,7 +692,14 @@ function markStale() {
 }
 
 // ---------------------------------------------------------------- slicing
+let slicing = false;
 async function slice() {
+  if (slicing) return; // the desktop menu / shortcut can fire while a slice is running
+  slicing = true;
+  try { await sliceNow(); } finally { slicing = false; }
+}
+
+async function sliceNow() {
   if (!objects.length) return;
   for (const o of objects) checkBounds(o);
   if (objects.some((o) => o.out)) return toast('Something is outside the printable area (shown in red). Move it inside first.', 'error');
@@ -713,7 +725,13 @@ async function slice() {
   const per = Math.ceil(layers / threads);
   const done = new Array(threads).fill(0);
   let cancelled = false;
-  const dlg = progressDialog(`Slicing ${layers} layers`, { onCancel: () => { cancelled = true; for (const w of sliceWorkers) w.terminate(); sliceWorkers = null; setStatus('Slicing cancelled'); } });
+  const dlg = progressDialog(`Slicing ${layers} layers`, { onCancel: () => {
+    cancelled = true;
+    // terminate() never answers pending calls; reject them so slice() finishes and releases its buffers
+    for (const w of sliceWorkers || []) { w.terminate(); for (const p of w.pending.values()) p.reject(new Error('cancelled')); w.pending.clear(); }
+    sliceWorkers = null;
+    setStatus('Slicing cancelled');
+  } });
   const t0 = performance.now();
   setStatus(`Slicing ${layers} layers on ${threads} thread${threads > 1 ? 's' : ''}`, true);
   try {
@@ -734,6 +752,7 @@ async function slice() {
     const totalSeconds = estimatePrintTime(state.print, layers, machine.tiltSeconds);
     dlg.set(1, 'Rendering thumbnails');
     await new Promise((r) => setTimeout(r, 20));
+    if (cancelled) return;
     const big = rgbaToRgb565(viewport.snapshot(290), 290, 290);
     const small = rgbaToRgb565(viewport.snapshot(116), 116, 116);
     const name = (objects[0].name || 'print').replace(/[^\w\- ]+/g, '_').slice(0, 40);
@@ -744,8 +763,7 @@ async function slice() {
     $('#mode-preview').disabled = false;
     setMode('preview');
   } catch (e) {
-    if (!cancelled) toast(`Slicing failed: ${e.message}`, 'error');
-    setStatus('Ready');
+    if (!cancelled) { toast(`Slicing failed: ${e.message}`, 'error'); setStatus('Ready'); }
   } finally {
     dlg.close();
   }
@@ -932,8 +950,8 @@ async function openFiles(files) {
   }
 }
 
-function headerToPrint(h) {
-  const p = { ...DEFAULT_PRINT };
+function headerToPrint(h, base = DEFAULT_PRINT) {
+  const p = { ...base };
   for (const k of ['layerHeight', 'exposureTime', 'bottomExposureTime', 'bottomLayerCount', 'transitionLayerCount', 'delayMode', 'lightOffDelay', 'bottomWaitAfterCure', 'bottomWaitAfterLift', 'bottomWaitBeforeCure', 'waitAfterCure', 'waitAfterLift', 'waitBeforeCure',
     'bottomLiftHeight', 'bottomLiftSpeed', 'liftHeight', 'liftSpeed', 'bottomRetractHeight', 'bottomRetractSpeed', 'retractHeight', 'retractSpeed', 'bottomLiftHeight2', 'bottomLiftSpeed2', 'liftHeight2', 'liftSpeed2', 'bottomRetractHeight2', 'bottomRetractSpeed2', 'retractHeight2', 'retractSpeed2', 'bottomLightPWM', 'lightPWM']) {
     if (Number.isFinite(h[k])) p[k] = Math.round(h[k] * 1000) / 1000;
@@ -945,10 +963,9 @@ function headerToPrint(h) {
 async function importGooSettings(file) {
   try {
     const { header } = parseGoo(await file.arrayBuffer());
-    const p = headerToPrint(header);
+    const p = headerToPrint(header, state.print); // keep slicer-only options such as anti-aliasing
     if (!(await confirmDialog({ title: `Use settings from ${file.name}?`, body: `Sliced by ${header.softwareName || 'unknown software'} for ${header.machineName || 'an unknown printer'}: ${p.layerHeight} mm layers, ${p.exposureTime} s exposure, ${p.bottomExposureTime} s × ${p.bottomLayerCount} bottom layers, lift ${p.liftHeight} mm at ${p.liftSpeed} mm/min. This replaces your Print tab values.`, ok: 'Use these settings' }))) return;
     Object.assign(state.print, p);
-    if (!RELEASE_PRESETS.custom) RELEASE_PRESETS.custom = { label: 'Custom (imported from a .goo)', hint: 'Lift values copied from an imported file. Edit them below.', values: {} };
     buildPrintTab();
     saveState(state);
     markStale();
@@ -964,7 +981,7 @@ async function openGoo(file) {
     const print = headerToPrint(header);
     sliced = {
       fromFile: true, fileName: file.name, blob: file, header, layers: layers.map((l) => l.rle), stats: layers.map(() => ({ lit: null, islands: [] })), islands: [],
-      layerHeight: header.layerHeight, layerCount: header.layerCount, volumeMm3: header.volume, totalSeconds: header.printTime, print, size: buffer.byteLength,
+      layerHeight: print.layerHeight, layerCount: header.layerCount, volumeMm3: header.volume, totalSeconds: header.printTime, print, size: buffer.byteLength,
       machine: { gooName: header.machineName, resX: header.resolutionX, resY: header.resolutionY, width: header.displayWidth, depth: header.displayHeight, height: header.machineZ, mirrorX: !!header.mirrorX, mirrorY: !!header.mirrorY },
       name: file.name.replace(/\.goo$/i, ''),
     };

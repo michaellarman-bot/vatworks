@@ -27,6 +27,13 @@ try {
   ok(p.Data?.Ack === 0, 'explicit print command acknowledged');
   const bad = await (await fetch(`${base}/api/printer/8.8.8.8/info`)).json();
   ok(!!bad.error, 'public IPs are refused');
+  ok(lines.at(-1).ack?.Data?.Ack === 0, 'final upload line carries the print acknowledgement');
+  const octal = await (await fetch(`${base}/api/printer/010.010.010.010/info`)).json();
+  ok(!!octal.error, 'leading-zero (octal) IPs are refused');
+  const cross = await fetch(`${base}/api/printer/127.0.0.1/stop`, { method: 'POST', headers: { Origin: 'https://evil.example' } });
+  ok(cross.status === 403 && !mock.state.commands.includes(130), 'cross-origin printer commands are refused');
+  const empty = (await (await fetch(`${base}/api/printer/127.0.0.1/upload?name=e.goo&print=1`, { method: 'POST', body: new Uint8Array(0) })).text()).trim().split('\n').map((l) => JSON.parse(l));
+  ok(empty.at(-1).error && !mock.state.prints.includes('e.goo'), 'an empty upload is rejected and never printed');
 } catch (e) { ok(false, e.message); } finally { mock.close(); }
 console.log(failed ? `${failed} FAILED` : 'bridge: all passed');
 process.exit(failed ? 1 : 0);

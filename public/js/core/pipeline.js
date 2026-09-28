@@ -53,7 +53,7 @@ export class SliceJob {
   }
 }
 
-/** Total layers needed to cover the solids. */
+/** Total layers needed to cover the solids: layers are sampled mid-height, so one whose sample plane is above maxZ is blank. */
 export function layerCountFor(maxZ, layerHeight) {
-  return Math.max(0, Math.ceil(maxZ / layerHeight - 1e-6));
+  return Math.max(0, Math.ceil(maxZ / layerHeight - 0.5));
 }

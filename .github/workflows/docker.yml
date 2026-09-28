@@ -21,6 +21,11 @@ jobs:
         with:
           node-version: 22
       - run: node test/core.test.mjs
+      - name: Printer bridge against the mock printer
+        run: |
+          npm install --no-save --ignore-scripts ws
+          node server.js & sleep 1
+          node test/bridge.test.mjs
 
   build:
     needs: test

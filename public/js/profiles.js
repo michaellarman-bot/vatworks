@@ -53,6 +53,11 @@ export const RELEASE_PRESETS = {
         'retractSpeed', 'retractHeight2', 'retractSpeed2'].map((k) => [k, 0]),
     ),
   },
+  custom: {
+    label: 'Custom (imported from a .goo)',
+    hint: 'Lift values copied from an imported file, or edited by hand. Edit them below.',
+    values: {},
+  },
 };
 
 export const DEFAULT_PRINT = {
