@@ -18,5 +18,14 @@ services:
     network_mode: host
     environment:
       - PORT=${PORT:-8090}
+      # Secure by default: the web UI listens on loopback only. To open it to
+      # other devices on your LAN, set HOST=0.0.0.0 in your .env AND set a
+      # password below. (Printer discovery still works either way.)
+      - HOST=${HOST:-127.0.0.1}
+      # Require a login. STRONGLY recommended whenever HOST is not 127.0.0.1 —
+      # without it, anyone on the network can control your printer. Uncomment
+      # and set a password (put the value in your .env file, not here):
+      # - VATWORKS_USER=${VATWORKS_USER:-admin}
+      # - VATWORKS_PASSWORD=${VATWORKS_PASSWORD}
     # ports:
     #   - "8090:8090"

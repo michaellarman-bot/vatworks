@@ -62,6 +62,30 @@ Running Docker inside an unprivileged Proxmox LXC needs the container's *nesting
 If you publish it through Cloudflare Tunnel, put it behind Cloudflare Access (or any login). Anyone who can reach the
 page can start a print on your printer.
 
+## Security — who can reach it
+
+Vatworks can upload files to and start/stop prints on your printer, so treat the
+web UI like a remote control for the printer.
+
+- **Loopback by default.** The server now listens on `127.0.0.1` (this machine
+  only). Nothing on your wider network can reach it unless you opt in.
+- **Opening it to your LAN.** To use Vatworks from another device, set
+  `HOST=0.0.0.0`. When you do, **set a password** as well:
+
+  ```
+  HOST=0.0.0.0
+  VATWORKS_USER=admin
+  VATWORKS_PASSWORD=something-only-you-know
+  ```
+
+  With `VATWORKS_PASSWORD` set, every request needs that login (HTTP Basic). If
+  you bind to a network address without a password, Vatworks prints a warning at
+  startup.
+- **Never expose it to the public internet.** Do not port-forward `8090`. Even
+  with a password it is meant for your own trusted network only.
+
+The health check (`/healthz`) is the only path that never requires a login.
+
 ## Mac app
 
 The same Vatworks packaged as a native macOS app with Electron: a Dock icon, native Open/Save dialogs,

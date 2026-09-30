@@ -298,11 +298,46 @@ function serveStatic(req, res, url) {
   });
 }
 
+// Optional password gate. When VATWORKS_PASSWORD is set, every request must
+// present HTTP Basic credentials (user defaults to "admin"). When it is unset
+// the server stays open (backward compatible) but warns at startup if it is
+// also bound to a network-reachable address.
+const AUTH_USER = process.env.VATWORKS_USER || 'admin';
+const AUTH_PASS = process.env.VATWORKS_PASSWORD || '';
+
+function timingEqual(a, b) {
+  const ba = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+function authorized(req) {
+  if (!AUTH_PASS) return true;
+  const m = /^Basic\s+(.+)$/i.exec(req.headers['authorization'] || '');
+  if (!m) return false;
+  let decoded = '';
+  try { decoded = Buffer.from(m[1], 'base64').toString('utf8'); } catch { return false; }
+  const i = decoded.indexOf(':');
+  if (i < 0) return false;
+  return timingEqual(decoded.slice(0, i), AUTH_USER) && timingEqual(decoded.slice(i + 1), AUTH_PASS);
+}
+
 /** Creates the HTTP server without listening. Used by the CLI below and by the desktop app. */
 export function createServer({ publicDir } = {}) {
   if (publicDir) PUBLIC = publicDir;
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    if (url.pathname === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('ok');
+      return;
+    }
+    if (!authorized(req)) {
+      res.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Vatworks"', 'Content-Type': 'text/plain' });
+      res.end('Authentication required.');
+      return;
+    }
     try {
       if (url.pathname.startsWith('/api/')) await api(req, res, url);
       else serveStatic(req, res, url);
@@ -315,13 +350,17 @@ export function createServer({ publicDir } = {}) {
 }
 
 /** Starts listening; resolves with the bound port (pass port 0 for a random free port). */
-export function start({ port = +(process.env.PORT || 8090), host = process.env.HOST || '0.0.0.0', publicDir } = {}) {
+export function start({ port = +(process.env.PORT || 8090), host = process.env.HOST || '127.0.0.1', publicDir } = {}) {
   const server = createServer({ publicDir });
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, host, () => {
       const bound = server.address().port;
-      log(`Vatworks listening on http://${host}:${bound}  (static: ${PUBLIC})`);
+      const networkReachable = host !== '127.0.0.1' && host !== 'localhost' && host !== '::1';
+      log(`Vatworks listening on http://${host}:${bound}  (auth: ${AUTH_PASS ? 'on' : 'off'}, static: ${PUBLIC})`);
+      if (networkReachable && !AUTH_PASS) {
+        log(`WARNING: bound to ${host} (reachable from other devices) with NO password. Anyone on the network could control your printer. Set VATWORKS_PASSWORD to require a login, or use HOST=127.0.0.1 for this machine only.`);
+      }
       resolve({ server, port: bound });
     });
   });

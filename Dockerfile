@@ -7,9 +7,13 @@ LABEL org.opencontainers.image.title="Vatworks" \
 WORKDIR /app
 COPY package.json server.js ./
 COPY public ./public
-ENV PORT=8090 HOST=0.0.0.0 NODE_ENV=production
+# Secure by default: bind to loopback only. To reach Vatworks from other
+# devices on your LAN, set HOST=0.0.0.0 AND set VATWORKS_PASSWORD to require a
+# login (see docker-compose.yml). Without a password an exposed instance lets
+# anyone on the network control your printer.
+ENV PORT=8090 HOST=127.0.0.1 NODE_ENV=production
 EXPOSE 8090
 USER node
 HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/" > /dev/null || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT}/healthz" > /dev/null || exit 1
 CMD ["node", "server.js"]
